@@ -106,11 +106,6 @@ namespace RockLib.Messaging
             get { return _headers; }
         }
 
-        IEnumerable<KeyValuePair<string, string>> ISenderMessage.Headers
-        {
-            get { return Headers; }
-        }
-
         /// <summary>
         /// Gets the priority of the message.
         /// </summary>

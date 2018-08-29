@@ -1,4 +1,7 @@
-﻿using System.Text;
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Text;
 
 namespace RockLib.Messaging
 {
@@ -36,34 +39,66 @@ namespace RockLib.Messaging
         /// <returns>The binary value of the message.</returns>
         byte[] GetBinaryValue(Encoding encoding);
 
-        /// <summary>
-        /// Gets a header value by key. If the implementation "speaks" binary,
-        /// <paramref name="encoding"/> is used to convert the binary header to a string.
-        /// If <paramref name="encoding"/> is null, the binary header will be converted
-        /// using base 64 encoding.
-        /// </summary>
-        /// <param name="key">The key of the header to retrieve.</param>
-        /// <param name="encoding">
-        /// The encoding to use. A null value indicates that base 64 encoding should be used.
-        /// </param>
-        /// <returns>The string value of the header.</returns>
-        string GetHeaderValue(string key, Encoding encoding);
+        ReceiverMessageHeaders Headers { get; }
 
         /// <summary>
-        /// Gets the names of the headers that are available for this message.
-        /// </summary>
-        /// <returns>An array containing the names of the headers for this message.</returns>
-        string[] GetHeaderNames();
-
-        /// <summary>
-        /// Acknowledges the message.
+        /// Acknowledges the message, i
         /// </summary>
         void Acknowledge();
+
+        /// <summary>
+        /// Rolls the message back.
+        /// </summary>
+        void Rollback();
+
+        bool IsTransactional { get; }
 
         /// <summary>
         /// Returns an instance of <see cref="ISenderMessage"/> that is equivalent to this
         /// instance of <see cref="IReceiverMessage"/>.
         /// </summary>
         ISenderMessage ToSenderMessage();
+    }
+
+    public sealed class ReceiverMessageHeaders : IReadOnlyDictionary<string, object>
+    {
+        private readonly IReadOnlyDictionary<string, object> _rawHeaders;
+
+        public ReceiverMessageHeaders(IReadOnlyDictionary<string, object> rawHeaders)
+        {
+            _rawHeaders = rawHeaders ?? throw new ArgumentNullException(nameof(rawHeaders));
+        }
+
+        // get string header
+        // get int header
+        // get byte header
+
+        public object this[string key] => _rawHeaders[key];
+
+        public IEnumerable<string> Keys => _rawHeaders.Keys;
+
+        public IEnumerable<object> Values => _rawHeaders.Values;
+
+        public int Count => _rawHeaders.Count;
+
+        public bool ContainsKey(string key)
+        {
+            return _rawHeaders.ContainsKey(key);
+        }
+
+        public IEnumerator<KeyValuePair<string, object>> GetEnumerator()
+        {
+            return _rawHeaders.GetEnumerator();
+        }
+
+        public bool TryGetValue(string key, out object value)
+        {
+            return _rawHeaders.TryGetValue(key, out value);
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return _rawHeaders.GetEnumerator();
+        }
     }
 }
