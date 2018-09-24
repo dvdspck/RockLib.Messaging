@@ -6,6 +6,7 @@ using RockLib.Immutable;
 using RockLib.Configuration.ObjectFactory;
 using Microsoft.Extensions.Configuration;
 using System.Reflection;
+using System.Text;
 
 namespace RockLib.Messaging
 {
@@ -144,6 +145,129 @@ namespace RockLib.Messaging
             }
 
             return defaultTypes;
+        }
+
+        public static IEnumerable<Scenario> AvailableSenders => Configuration.GetAvailableSenders();
+
+        public static IEnumerable<Scenario> AvailableReceivers => Configuration.GetAvailableReceivers();
+
+        public static IEnumerable<Scenario> GetAvailableSenders(this IConfiguration configuration) =>
+            configuration.GetSection("senders").GetAvailableScenarios(configuration, typeof(ISender));
+
+        public static IEnumerable<Scenario> GetAvailableReceivers(this IConfiguration configuration) =>
+            configuration.GetSection("receivers").GetAvailableScenarios(configuration, typeof(IReceiver));
+
+        private static IEnumerable<Scenario> GetAvailableScenarios(this IConfigurationSection sendersOrReceiversSection, IConfiguration configuration, Type interfaceType)
+        {
+            if (sendersOrReceiversSection.IsEmpty())
+                yield break;
+
+            if (sendersOrReceiversSection.IsList())
+            {
+                foreach (var senderOrReceiverSection in sendersOrReceiversSection.GetChildren())
+                    yield return new Scenario(senderOrReceiverSection, configuration, interfaceType);
+            }
+            else
+            {
+                yield return new Scenario(sendersOrReceiversSection, configuration, interfaceType);
+            }
+        }
+
+        private static IEnumerable<KeyValuePair<string, string>> GetSettings(this IConfigurationSection section)
+        {
+            if (section.Value != null)
+                yield return new KeyValuePair<string, string>(section.Path, section.Value);
+            else
+                foreach (var child in section.GetChildren())
+                    foreach (var descendant in child.GetSettings())
+                        yield return descendant;
+        }
+
+        public class Scenario
+        {
+            private readonly IConfigurationSection _section;
+            private readonly IConfiguration _configuration;
+            private readonly Type _interfaceType;
+
+            internal Scenario(IConfigurationSection section, IConfiguration configuration, Type interfaceType)
+            {
+                _section = section;
+                _configuration = configuration;
+                _interfaceType = interfaceType;
+            }
+
+            public string Name => _section.GetSectionName();
+
+            public Type Type
+            {
+                get
+                {
+                    var typeString = _section["type"];
+                    if (typeString == null)
+                    {
+                        if (_interfaceType == typeof(ISender))
+                            typeString = _configuration["defaultSenderType"];
+                        else
+                            typeString = _configuration["defaultReceiverType"];
+                    }
+
+                    if (typeString == null)
+                        return null;
+
+                    Type type;
+
+                    try
+                    {
+                        type = Type.GetType(typeString);
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+
+                    if (type == null || !_interfaceType.GetTypeInfo().IsAssignableFrom(type))
+                        return null;
+
+                    return type;
+                }
+            }
+
+            public IEnumerable<KeyValuePair<string, string>> Settings
+            {
+                get
+                {
+                    var valueSection = _section;
+
+                    if (_section["type"] != null)
+                        valueSection = _section.GetSection("value");
+
+                    return valueSection.GetSettings();
+                }
+            }
+
+            public override string ToString()
+            {
+                var sb = new StringBuilder();
+
+                sb.AppendLine($"Name: {Name ?? "<not found>"}");
+                sb.AppendLine($"Type: {Type?.FullName ?? "<not found or unable to load>"}");
+
+                var settings = Settings.ToList();
+
+                if (settings.Count == 0)
+                    sb.AppendLine("Settings: <none found>");
+                else
+                {
+                    sb.AppendLine("Settings:");
+
+                    var padding = settings.OrderByDescending(s => s.Key.Length).Select(s => s.Key.Length).FirstOrDefault();
+
+                    foreach (var setting in settings)
+                        sb.AppendLine($"    {setting.Key.PadRight(padding)} -> {setting.Value}");
+                }
+
+                return sb.ToString();
+            }
         }
     }
 }
