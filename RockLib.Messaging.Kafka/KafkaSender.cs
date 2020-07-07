@@ -9,9 +9,10 @@ namespace RockLib.Messaging.Kafka
     /// <summary>
     /// An implementation of <see cref="ISender"/> that sends messages to Kafka.
     /// </summary>
-    public class KafkaSender : ISender
+    public class KafkaSender : ITransactionalSender
     {
-        private readonly Lazy<IProducer<Null, string>> _producer;
+        private readonly Lazy<IProducer<Null, string>> _singletonProducer;
+        private readonly ProducerBuilder<Null, string> _producerBuilder;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="KafkaSender"/> class.
@@ -39,10 +40,10 @@ namespace RockLib.Messaging.Kafka
             Config.BootstrapServers = bootstrapServers ?? throw new ArgumentNullException(nameof(bootstrapServers));
             Config.MessageTimeoutMs = Config.MessageTimeoutMs ?? messageTimeoutMs;
 
-            var producerBuilder = new ProducerBuilder<Null, string>(Config);
-            producerBuilder.SetErrorHandler(OnError);
+            _producerBuilder = new ProducerBuilder<Null, string>(Config);
+            _producerBuilder.SetErrorHandler(OnError);
 
-            _producer = new Lazy<IProducer<Null, string>>(() => producerBuilder.Build());
+            _singletonProducer = new Lazy<IProducer<Null, string>>(() => _producerBuilder.Build());
         }
 
         /// <summary>
@@ -72,6 +73,38 @@ namespace RockLib.Messaging.Kafka
         /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
         public Task SendAsync(SenderMessage message, CancellationToken cancellationToken)
         {
+            return _singletonProducer.Value.ProduceAsync(Topic, GetMessage(message));
+        }
+
+        /// <summary>
+        /// Starts a message-sending transaction.
+        /// </summary>
+        /// <returns>
+        /// An object representing the new transaction.
+        /// </returns>
+        public ISenderTransaction BeginTransaction()
+        {
+            var producer = _producerBuilder.Build();
+            producer.InitTransactions(TimeSpan.FromSeconds(1));
+            producer.BeginTransaction();
+
+            return new KafkaSenderTransaction(GetMessage, producer, Topic);
+        }
+
+        /// <summary>
+        /// Flushes the producer and disposes it.
+        /// </summary>
+        public void Dispose()
+        {
+            if (_singletonProducer.IsValueCreated)
+            {
+                _singletonProducer.Value.Flush(TimeSpan.FromSeconds(10));
+                _singletonProducer.Value.Dispose();
+            }
+        }
+
+        private static Message<Null, string> GetMessage(SenderMessage message)
+        {
             if (message.OriginatingSystem == null)
                 message.OriginatingSystem = "Kafka";
 
@@ -84,23 +117,10 @@ namespace RockLib.Messaging.Kafka
                     kafkaMessage.Headers.Add(header.Key, Encoding.UTF8.GetBytes(header.Value.ToString()));
             }
 
-            return _producer.Value.ProduceAsync(Topic, kafkaMessage);
+            return kafkaMessage;
         }
 
-        /// <summary>
-        /// Flushes the producer and disposes it.
-        /// </summary>
-        public void Dispose()
-        {
-            if (_producer.IsValueCreated)
-            {
-                _producer.Value.Flush(TimeSpan.FromSeconds(10));
-                _producer.Value.Dispose();
-            }
-        }
-
-        private void OnError(IProducer<Null, string> producer, Error error) 
+        private void OnError(IProducer<Null, string> producer, Error error)
             => Error?.Invoke(this, new ErrorEventArgs(error.Reason, new KafkaException(error)));
-
     }
 }
